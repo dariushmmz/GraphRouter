@@ -1,0 +1,38 @@
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+clean_venv/
+.venv/
+uv.lock
+
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+wandb/
+*.log
+*.pkl
+*.pth
+
+# Data files (if large)
+data/*.csv
+data/*.parquet
+data/*.json

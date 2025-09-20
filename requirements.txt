@@ -1,0 +1,14 @@
+datasets==3.3.2
+numpy<2.0.0
+pandas==2.2.3
+scikit-learn==1.6.1
+scipy==1.15.2
+tqdm==4.67.1
+transformers==4.49.0
+litellm==1.52.10
+bert-score
+torch>=2.0.0
+torch-geometric
+sentence-transformers
+plotly
+pyyaml
