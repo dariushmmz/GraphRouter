@@ -26,6 +26,9 @@ dependencies = [
     "sentence-transformers",
     "plotly",
     "pyyaml",
+    "wandb>=0.23.0",
+    "ipykernel>=7.1.0",
+    "beartype>=0.22.7",
 ]
 
 [project.optional-dependencies]

@@ -12,14 +12,10 @@ import plotly.io as pio
 
 from model.graph_nn import EncoderDecoderNet, form_data
 
-device = "cpu"  # use CPU by default
-
-
-llm_embedding_path = 'configs/llm_description_embedding.pkl'
-llm_description_path = 'configs/LLM_Descriptions.json'
-
-embedding_dim = 16
-# edge_dim = 3
+def to_bool_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().clone().bool()
+    return torch.tensor(x, dtype=torch.bool)
 
 
 def loadpkl(filename: str) -> any:
@@ -53,18 +49,28 @@ def loadjson(filename: str) -> dict:
         data = json.load(file)
     return data
 
+def parse_embedding(raw):
+    # extract all float-like tokens from the string
+    nums = re.findall(r'[-+]?\d*\.\d+(?:[eE][-+]?\d+)?|[-+]?\d+(?:[eE][-+]?\d+)?', raw)
+    return [float(n) for n in nums]
+
 
 def parse_embedding_field(raw):
     if isinstance(raw, (list, np.ndarray)):
         return np.array(raw, dtype=float)
-    s = str(raw).strip()
-    s = re.sub(r'\s+', ', ', s)
-    try:
-        parsed = json.loads(s)
-    except Exception:
-        parsed = json.loads(s.replace("[[,", "[["))
-    return np.array(parsed[0], dtype=float)
 
+    try:
+        parsed = parse_embedding(raw)
+        return np.array(parsed, dtype=float)
+    except:
+        s = str(raw).strip()
+        s = re.sub(r'\s+', ', ', s)
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            parsed = json.loads(s.replace("[[,", "[["))
+
+        return np.array(parsed[0], dtype=float)
 
 def ensure_2d(arr):
     arr = np.asarray(arr)
@@ -81,38 +87,11 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
     if nrows % num_llms != 0:
         raise ValueError(f"router_data rows {nrows} not divisible by num_llms {num_llms}")
 
-    df = df.iloc[[int(query_id)]]
+    start = int(query_id) * num_llms
+    rows = df.iloc[start:start + num_llms]
 
-    query_embedding_list_raw = df['query_embedding'].tolist()
-    task_embedding_list_raw = df['task_description_embedding'].tolist()
-
-    query_embedding_list = []
-    task_embedding_list = []
-
-    for inter in query_embedding_list_raw:
-        inter = re.sub(r'\s+', ', ', inter.strip())
-        try:
-            inter = json.loads(inter)
-        except:
-            inter = inter.replace("[[,", "[[")
-            inter = json.loads(inter)
-        query_embedding_list.append(inter[0])
-
-    for inter in task_embedding_list_raw:
-        inter = re.sub(r'\s+', ', ', inter.strip())
-        try:
-            inter = json.loads(inter)
-        except:
-            inter = inter.replace("[[,", "[[")
-            inter = json.loads(inter)
-        task_embedding_list.append(inter[0])
-
-
-    q_emb = np.array(query_embedding_list)
-    t_emb = np.array(task_embedding_list)
-
-    q_emb = ensure_2d(parse_embedding_field(q_emb[0]))
-    t_emb = ensure_2d(parse_embedding_field(t_emb[0]))
+    q_emb = ensure_2d(parse_embedding_field(rows['query_embedding'].iloc[0]))
+    t_emb = ensure_2d(parse_embedding_field(rows['task_description_embedding'].iloc[0]))
 
     llm_embeddings = np.asarray(llm_embeddings, dtype=float)
     if llm_embeddings.ndim == 1:
@@ -123,18 +102,24 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
     if llm_embeddings.shape[0] == 1 and num_llms > 1:
         llm_embeddings = np.tile(llm_embeddings, (num_llms, 1))
 
-    effect_list = np.array(df['effect'].tolist(), dtype=float)
-    cost_list = np.array(df['cost'].tolist(), dtype=float)
+    effect_list = np.array(rows['effect'].tolist(), dtype=float)
+    cost_list = np.array(rows['cost'].tolist(), dtype=float)
+    # combined_edge = np.concatenate([cost_list.reshape(-1, 1), effect_list.reshape(-1, 1)], axis=1)
 
-    # ====================== Build combined_edge ======================
-    # include feedback (normalized)
     if 'avg_feedback' in df.columns:
-        feedback_list = np.array(df['avg_feedback'].fillna(0).tolist())
-        # normalize if values in 1..5
+        feedback_list = df['avg_feedback'].fillna(0)
+        feedback_list = feedback_list.iloc[start:start + num_llms]
+        feedback_list = np.array(feedback_list)
+
         if feedback_list.max() > 1.0:
             feedback_list = (feedback_list - 1.0) / 4.0
 
-        
+        print("feedback_list:", feedback_list.shape)
+        print("cost_list:", cost_list.shape)
+        print("effect_list:", effect_list.shape)
+
+
+
         combined_edge = np.concatenate(
             (
                 cost_list.reshape(-1, 1),
@@ -152,7 +137,6 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
             axis=1
         )
 
-    # combined_edge = np.concatenate([cost_list.reshape(-1, 1), effect_list.reshape(-1, 1)], axis=1)
 
     if scenario == "Performance First":
         eff_adj = 1.0 * effect_list - 0.0 * cost_list
@@ -167,14 +151,18 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
     des_node = list(range(num_llms))
     mask_all = np.ones(num_llms, dtype=bool)
 
-    # # pad/truncate combined_edge
+    print(combined_edge.shape)
+
+    # pad/truncate combined_edge
     # if combined_edge.shape[1] != edge_dim:
     #     if combined_edge.shape[1] < edge_dim:
     #         pad = np.zeros((combined_edge.shape[0], edge_dim - combined_edge.shape[1]), dtype=float)
     #         combined_edge = np.concatenate([combined_edge, pad], axis=1)
     #     else:
     #         combined_edge = combined_edge[:, :edge_dim]
-    
+
+    # print(combined_edge.shape)
+
     data_dict = {
         "task_id": t_emb.astype(np.float32),
         "query_feature": q_emb.astype(np.float32),
@@ -190,8 +178,8 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
         "test_mask": mask_all
     }
 
-    query_text = df['query'].iloc[0] if 'query' in df.columns else f"query_{query_id}"
-    task_text = df['task_description'].iloc[0] if 'task_description' in df.columns else f"task_{query_id}"
+    query_text = rows['query'].iloc[0] if 'query' in rows.columns else f"query_{query_id}"
+    task_text = rows['task_description'].iloc[0] if 'task_description' in rows.columns else f"task_{query_id}"
 
     return data_dict, (query_text, task_text), llm_names
 
@@ -218,14 +206,16 @@ def run_safe_inference(query_id=0, checkpoint=None, scenario="Cost First"):
         test_mask=data_dict['test_mask']
     )
 
-    edge_mask_t = torch.tensor(data_obj.edge_mask, dtype=torch.bool)
-    edge_can_see = torch.tensor(data_obj.test_mask, dtype=torch.bool)
+    # edge_mask_t = torch.tensor(data_obj.edge_mask, dtype=torch.bool)
+    edge_mask_t = to_bool_tensor(data_obj.edge_mask)
+    # edge_can_see = torch.tensor(data_obj.test_mask, dtype=torch.bool)
+    edge_can_see = to_bool_tensor(data_obj.test_mask)
 
     q_dim = data_obj.query_features.shape[1]
     llm_dim = data_obj.llm_features.shape[1]
     in_edges = data_obj.combined_edge.shape[1]
-    # in_edges = edge_dim  # use the same edge_dim as training
-    # print(in_edges)
+    in_edges = edge_dim  # use the same edge_dim as training
+    print(in_edges)
 
 
     model = EncoderDecoderNet(query_feature_dim=q_dim, llm_feature_dim=llm_dim,
@@ -266,7 +256,7 @@ def run_safe_inference(query_id=0, checkpoint=None, scenario="Cost First"):
 import plotly.express as px
 import pandas as pd
 
-def plot_llm_scores(query_id, scenarios=None, plot=True):
+def plot_llm_scores(query_id, scenarios=None):
     """
     Run LLM inference for a given query and plot scores across scenarios.
 
@@ -282,7 +272,6 @@ def plot_llm_scores(query_id, scenarios=None, plot=True):
         scenarios = ["Cost First", "Balance", "Performance First"]
 
     results_list = []
-    best_selected_llms = []
 
     # Run inference for each scenario and prepare results
     for i, scenario in enumerate(scenarios):
@@ -292,8 +281,6 @@ def plot_llm_scores(query_id, scenarios=None, plot=True):
             print()
         print(f"-------------{scenario}-------------------")
         print("Best LLM:", out['best_llm'])
-        best_selected_llms.append(out['best_llm'])
-
 
         for llm, score in out['scores'].items():
             results_list.append({"LLM": llm, "Score": score, "Scenario": scenario})
@@ -301,48 +288,45 @@ def plot_llm_scores(query_id, scenarios=None, plot=True):
 
     df_scores = pd.DataFrame(results_list)
 
+    # Compute min/max for y-axis with margin
+    y_min = df_scores["Score"].min()
+    y_max = df_scores["Score"].max()
+    margin = (y_max - y_min) * 0.05  # 5% margin
 
-    if plot:
-        # Compute min/max for y-axis with margin
-        y_min = df_scores["Score"].min()
-        y_max = df_scores["Score"].max()
-        margin = (y_max - y_min) * 0.05  # 5% margin
+    # Create interactive grouped bar chart
+    fig = px.bar(
+        df_scores,
+        x="LLM",
+        y="Score",
+        color="Scenario",
+        barmode="group",
+        text=df_scores["Score"].apply(lambda x: f"{x:.3f}"),
+        title=f"LLM Scores Across Different Scenarios for Query {query_id}"
+    )
 
+    # Update layout for better readability
+    fig.update_layout(
+        xaxis_title="LLM",
+        yaxis_title="Score",
+        xaxis_tickangle=-45,
+        yaxis=dict(showgrid=True, range=[y_min - margin, y_max + margin]),
+        legend_title="Scenario",
+        template="plotly_white"
+    )
 
-        # Create interactive grouped bar chart
-        fig = px.bar(
-            df_scores,
-            x="LLM",
-            y="Score",
-            color="Scenario",
-            barmode="group",
-            text=df_scores["Score"].apply(lambda x: f"{x:.3f}"),
-            title=f"LLM Scores Across Different Scenarios for Query {query_id}"
-        )
-
-        # Update layout for better readability
-        fig.update_layout(
-            xaxis_title="LLM",
-            yaxis_title="Score",
-            xaxis_tickangle=-45,
-            yaxis=dict(showgrid=True, range=[y_min - margin, y_max + margin]),
-            legend_title="Scenario",
-            template="plotly_white"
-        )
-
-        os.makedirs("inference_results", exist_ok=True)
-        # Save as HTML file (recommended for headless environments)
-        fig.write_html(f"inference_results/llm_scores_query_{query_id}.html")
-        print(f"Graph saved as: llm_scores_query_{query_id}.html")
-        
-        pio.renderers.default = "browser"   # open in default browser
-        fig.show()
+    os.makedirs("inference_results", exist_ok=True)
+    # Save as HTML file (recommended for headless environments)
+    fig.write_html(f"inference_results/llm_scores_query_{query_id}.html")
+    print(f"Graph saved as: llm_scores_query_{query_id}.html")
     
-    return best_selected_llms
+    pio.renderers.default = "browser"   # open in default browser
+    fig.show()
+    
+    return df_scores['LLM'][0] # Cost First Selected LLM
+
 
 import json, time, os
 
-FEEDBACK_PATH = "data/feedback.jsonl"
 
 def save_feedback(query_id, llm_name, user_score, extra=None):
     rec = {
@@ -364,15 +348,15 @@ def ask_and_save_feedback(query_id, predicted_llm):
         score = int(s)
         save_feedback(query_id, predicted_llm, score)
 
-
+    
 import random
 
-def auto_score_feedback(query_id, predicted_llms):
+def auto_score_feedback(query_id, predicted_llms, LLM_NAME="NousResearch"):
     """
     Assign random feedback score, but penalize LLaMA-3 (70b) predictions.
     """
     for predicted_llm in predicted_llms:
-        if predicted_llm.strip().lower() == "NousResearch".lower():
+        if predicted_llm.strip().lower() == LLM_NAME.lower():
             score = random.randint(1, 2)  # penalize
         else:
             score = random.randint(3, 5)  # normal range
@@ -381,24 +365,45 @@ def auto_score_feedback(query_id, predicted_llms):
 
 
 if __name__ == "__main__":
+    device = "cpu"  # use CPU by default
+
+    ## CONFIGS ##
+    # saved_router_data_path = "data/router_data.csv"
+    saved_router_data_path = "data/router_data_nlgFA_normalized.csv"
+    llm_embedding_path = 'configs/llm_description_embedding_nlgFA_normalized.pkl'
+    llm_description_path = 'configs/LLM_Descriptions_nlgFA.json'
+    # model_path = 'model_path/best_model_qa.pth'
+    # model_path = 'model_path/model_with_feedback.pth'
+    model_path = 'model_path/best_model_nlgFA_Performance_First/best_f1.pt'
+
+    ## EMBEDDING DIM ##
+    embedding_dim = 8
+    ## EDGE DIM ##
+    edge_dim = 3
+
+    ## FEEDBACK PATH ##
+    os.makedirs("data/feedback/", exist_ok=True)
+    os.path.join("data/feedback/",saved_router_data_path.split("/")[-1].replace(".csv", "_feedback.jsonl"))
+    FEEDBACK_PATH = saved_router_data_path
+
+    LLM_NAME = "NousResearch"
+    
+
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--all", action="store_true", help="Run all queries automatically")
     parser.add_argument("--query_id", type=int, default=None)
     args = parser.parse_args()
 
-    saved_router_data_path = "data/router_data_with_feedback.csv"
-    # saved_router_data_path = "data/router_data.csv"
-
-    # model_path = 'model_path/best_model_qa.pth'
-    model_path = 'model_path/model_with_feedback.pth'
-
-
     df = pd.read_csv(saved_router_data_path)
+    llm_desc = loadjson(llm_description_path)
+    llm_names = list(llm_desc.keys())
+    num_llms = len(llm_names)
 
     if args.all:
         # num_queries = len(df) // len(loadjson(llm_description_path))
-        num_queries = len(df) 
+        num_queries = len(df) / num_llms
         print(f"Running inference for {num_queries} queries...")
         for qid in range(num_queries):
             # predicted_llm = plot_llm_scores(query_id=qid, plot=False)
@@ -406,10 +411,10 @@ if __name__ == "__main__":
 
             try:
                 predicted_llms = plot_llm_scores(query_id=qid, plot=False)
-                auto_score_feedback(qid, predicted_llms)
+                auto_score_feedback(qid, predicted_llms, LLM_NAME)
             except Exception as e:
                 print(f"⚠️ Skipped query {qid} due to error: {e}")
     else:
         qid = args.query_id if args.query_id is not None else 0
         predicted_llm = plot_llm_scores(query_id=qid)
-        auto_score_feedback(qid, predicted_llm)
+        auto_score_feedback(qid, predicted_llm, LLM_NAME)

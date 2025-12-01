@@ -12,13 +12,10 @@ import plotly.io as pio
 
 from model.graph_nn import EncoderDecoderNet, form_data
 
-device = "cpu"  # use CPU by default
-
-saved_router_data_path = "data/router_data.csv"
-llm_embedding_path = 'configs/llm_description_embedding.pkl'
-llm_description_path = 'configs/LLM_Descriptions.json'
-embedding_dim = 16
-edge_dim = 3
+def to_bool_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().clone().bool()
+    return torch.tensor(x, dtype=torch.bool)
 
 
 def loadpkl(filename: str) -> any:
@@ -52,18 +49,28 @@ def loadjson(filename: str) -> dict:
         data = json.load(file)
     return data
 
+def parse_embedding(raw):
+    # extract all float-like tokens from the string
+    nums = re.findall(r'[-+]?\d*\.\d+(?:[eE][-+]?\d+)?|[-+]?\d+(?:[eE][-+]?\d+)?', raw)
+    return [float(n) for n in nums]
+
 
 def parse_embedding_field(raw):
     if isinstance(raw, (list, np.ndarray)):
         return np.array(raw, dtype=float)
-    s = str(raw).strip()
-    s = re.sub(r'\s+', ', ', s)
-    try:
-        parsed = json.loads(s)
-    except Exception:
-        parsed = json.loads(s.replace("[[,", "[["))
-    return np.array(parsed[0], dtype=float)
 
+    try:
+        parsed = parse_embedding(raw)
+        return np.array(parsed, dtype=float)
+    except:
+        s = str(raw).strip()
+        s = re.sub(r'\s+', ', ', s)
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            parsed = json.loads(s.replace("[[,", "[["))
+
+        return np.array(parsed[0], dtype=float)
 
 def ensure_2d(arr):
     arr = np.asarray(arr)
@@ -97,7 +104,39 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
 
     effect_list = np.array(rows['effect'].tolist(), dtype=float)
     cost_list = np.array(rows['cost'].tolist(), dtype=float)
-    combined_edge = np.concatenate([cost_list.reshape(-1, 1), effect_list.reshape(-1, 1)], axis=1)
+    # combined_edge = np.concatenate([cost_list.reshape(-1, 1), effect_list.reshape(-1, 1)], axis=1)
+
+    if 'avg_feedback' in df.columns:
+        feedback_list = df['avg_feedback'].fillna(0)
+        feedback_list = feedback_list.iloc[start:start + num_llms]
+        feedback_list = np.array(feedback_list)
+
+        if feedback_list.max() > 1.0:
+            feedback_list = (feedback_list - 1.0) / 4.0
+
+        print("feedback_list:", feedback_list.shape)
+        print("cost_list:", cost_list.shape)
+        print("effect_list:", effect_list.shape)
+
+
+
+        combined_edge = np.concatenate(
+            (
+                cost_list.reshape(-1, 1),
+                effect_list.reshape(-1, 1),
+                feedback_list.reshape(-1, 1)
+            ),
+            axis=1
+        )
+    else:
+        combined_edge = np.concatenate(
+            (
+                cost_list.reshape(-1, 1),
+                effect_list.reshape(-1, 1),
+            ),
+            axis=1
+        )
+
 
     if scenario == "Performance First":
         eff_adj = 1.0 * effect_list - 0.0 * cost_list
@@ -112,13 +151,17 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
     des_node = list(range(num_llms))
     mask_all = np.ones(num_llms, dtype=bool)
 
+    print(combined_edge.shape)
+
     # pad/truncate combined_edge
-    if combined_edge.shape[1] != edge_dim:
-        if combined_edge.shape[1] < edge_dim:
-            pad = np.zeros((combined_edge.shape[0], edge_dim - combined_edge.shape[1]), dtype=float)
-            combined_edge = np.concatenate([combined_edge, pad], axis=1)
-        else:
-            combined_edge = combined_edge[:, :edge_dim]
+    # if combined_edge.shape[1] != edge_dim:
+    #     if combined_edge.shape[1] < edge_dim:
+    #         pad = np.zeros((combined_edge.shape[0], edge_dim - combined_edge.shape[1]), dtype=float)
+    #         combined_edge = np.concatenate([combined_edge, pad], axis=1)
+    #     else:
+    #         combined_edge = combined_edge[:, :edge_dim]
+
+    # print(combined_edge.shape)
 
     data_dict = {
         "task_id": t_emb.astype(np.float32),
@@ -140,8 +183,6 @@ def build_single_query_datasafe(df, llm_embeddings, query_id, scenario):
 
     return data_dict, (query_text, task_text), llm_names
 
-
-model_path = 'model_path/best_model_qa.pth'
 
 def run_safe_inference(query_id=0, checkpoint=None, scenario="Cost First"):
     df = pd.read_csv(saved_router_data_path)
@@ -165,12 +206,17 @@ def run_safe_inference(query_id=0, checkpoint=None, scenario="Cost First"):
         test_mask=data_dict['test_mask']
     )
 
-    edge_mask_t = torch.tensor(data_obj.edge_mask, dtype=torch.bool)
-    edge_can_see = torch.tensor(data_obj.test_mask, dtype=torch.bool)
+    # edge_mask_t = torch.tensor(data_obj.edge_mask, dtype=torch.bool)
+    edge_mask_t = to_bool_tensor(data_obj.edge_mask)
+    # edge_can_see = torch.tensor(data_obj.test_mask, dtype=torch.bool)
+    edge_can_see = to_bool_tensor(data_obj.test_mask)
 
     q_dim = data_obj.query_features.shape[1]
     llm_dim = data_obj.llm_features.shape[1]
     in_edges = data_obj.combined_edge.shape[1]
+    in_edges = edge_dim  # use the same edge_dim as training
+    print(in_edges)
+
 
     model = EncoderDecoderNet(query_feature_dim=q_dim, llm_feature_dim=llm_dim,
                               hidden_features=embedding_dim, in_edges=in_edges).to(device)
@@ -276,12 +322,58 @@ def plot_llm_scores(query_id, scenarios=None):
     pio.renderers.default = "browser"   # open in default browser
     fig.show()
     
-    return df_scores, fig
+    return df_scores['LLM'][0] # Cost First Selected LLM
+
+
+import json, time, os
+
+
+def save_feedback(query_id, llm_name, user_score, extra=None):
+    rec = {
+        "timestamp": time.time(),
+        "query_id": int(query_id),
+        "LLM": llm_name,
+        "Score": float(user_score),
+    }
+    if extra:
+        rec.update(extra)
+    os.makedirs(os.path.dirname(FEEDBACK_PATH), exist_ok=True)
+    with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def ask_and_save_feedback(query_id, predicted_llm):
+    s = input("\n===========> Score 1..5 (or blank to reject): ").strip()
+    if s.isdigit():
+        score = int(s)
+        save_feedback(query_id, predicted_llm, score)
 
 
 if __name__ == "__main__":
+    device = "cpu"  # use CPU by default
+
+    # saved_router_data_path = "data/router_data.csv"
+    saved_router_data_path = "data/router_data_nlgFA_normalized.csv"
+
+    llm_embedding_path = 'configs/llm_description_embedding_nlgFA_normalized.pkl'
+    llm_description_path = 'configs/LLM_Descriptions_nlgFA.json'
+    # model_path = 'model_path/best_model_qa.pth'
+    # model_path = 'model_path/model_with_feedback.pth'
+
+    model_path = 'model_path/best_model_nlgFA_Performance_First/best_f1.pt'
+
+
+    os.makedirs("data/feedback/", exist_ok=True)
+    os.path.join("data/feedback/",saved_router_data_path.split("/")[-1].replace(".csv", "_feedback.jsonl"))
+    FEEDBACK_PATH = saved_router_data_path
+    
+    embedding_dim = 8
+    edge_dim = 3
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--query_id", type=int, default=0)
     args = parser.parse_args()
-    plot_llm_scores(query_id=args.query_id)
+    predicted_llm = plot_llm_scores(query_id=args.query_id)
+    # ask_and_save_feedback(args.query_id, predicted_llm)
+    

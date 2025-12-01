@@ -1,0 +1,38 @@
+{
+    "Mistral-7b": {
+      "feature": "With 7 billion parameters, Mistral-7b is optimized for lightweight tasks, balancing speed and efficiency. Its cost per million tokens is 0.2, making it cost-effective for standard use cases without the need for complex computations.",
+      "input_price": 0.2,
+      "output_price": 0.2,
+      "model": "together_ai/mistralai/Mistral-7B-Instruct-v0.3"
+    },
+    "LLlama-3.1 (8B)": {
+      "feature": "An 8-billion-parameter instruct-tuned model from Meta (Llama 3.1), with very large context support (≈131K tokens). Designed for general purpose tasks: chat, code generation, translation, summarization. Good balance between performance, memory footprint and cost, and useful for fast, cost-effective inference.",
+      "input_price": 0.18,
+      "output_price": 0.18,
+      "model": "together_ai/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    },
+    "Mixtral-8x7B": {
+      "feature": "With a combined size of 56 billion parameters, this model aims to provide stronger language modeling capabilities. Its cost per million tokens is 0.6, reflecting its balance between performance and affordability for more complex tasks.",
+      "input_price": 0.6,
+      "output_price": 0.6,
+      "model": "together_ai/mistralai/Mixtral-8x7B-Instruct-v0.1"
+    },
+    "gpt-oss-20B": {
+      "feature": "A 20B-parameter model from OpenAI, licensed under Apache 2.0, with very high context length (128K) and built-in agentic capabilities (function calling, web browsing, Python execution). Very cost-effective for reasoning and agent workflows.",
+      "input_price": 0.05,
+      "output_price": 0.20,
+      "model": "together_ai/openai/gpt-oss-20b"
+    },
+    "Qwen-2.5 (7b)": {
+      "feature": "A 7.6-8 billion-parameter instruction-tuned model with FP8 quantization, designed for fast and efficient inference. Supports up to ~131 k token context, making it suitable for moderate-length documents, chat, code generation and instruction-following tasks — offering a good balance between speed, cost, and capability.",
+      "input_price": 0.30,
+      "output_price": 0.30,
+      "model": "together_ai/Qwen/Qwen2.5-7B-Instruct-Turbo"
+    },
+    "Gemma-3N (e4b)": {
+      "feature": "A lightweight, multimodal-capable model from Google designed for efficient inference: supports text (and in principle image / audio / video) input, optimized for low-resource devices, good for chat, translation, classification, and general instruction following. Uses selective parameter activation (approx. 4B effective size) and supports a 32K-token context window, making it a cost-efficient, flexible choice for many tasks, especially where low latency or on-device capability matters.",
+      "input_price": 0.02,
+      "output_price": 0.04,
+      "model": "together_ai/google/gemma-3n-E4B-it"
+    }
+  }

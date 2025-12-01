@@ -6,6 +6,12 @@ import torch.nn as nn
 from torch.optim import AdamW
 from sklearn.metrics import f1_score
 
+def to_bool_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().clone().bool()
+    return torch.tensor(x, dtype=torch.bool)
+
+
 class FeatureAlign(nn.Module):
 
     def __init__(self, query_feature_dim, llm_feature_dim, common_dim):
@@ -42,6 +48,7 @@ class EncoderDecoderNet(torch.nn.Module):
             edge_index_predict = edge_index[:, edge_mask]
             if edge_weight is not None:
                 edge_weight_mask = edge_weight[edge_can_see]
+
         edge_weight_mask=F.relu(self.edge_mlp(edge_weight_mask.reshape(-1, self.in_edges)))
         edge_weight_mask = edge_weight_mask.reshape(-1,self.in_edges)
         x_ini = (self.model_align(task_id, query_features, llm_features))
@@ -121,6 +128,7 @@ class form_data:
         edge_weight = torch.tensor(edge_feature_np, dtype=torch.float).reshape(-1,1)
         combined_edge = torch.tensor(combined_edge_np, dtype=torch.float)  # shape: (num_edges, k)
 
+    
         # create edge_index: note original code did des_node=[(i+1 + org_node[-1]) for i in des_node]
         # keep same semantics
         des_node_adj = [(i+1 + org_node[-1]) for i in des_node]
@@ -135,11 +143,17 @@ class form_data:
         # Concatenate leading edge_weight as first column (as repo used)
         combined_edge_final = torch.cat((edge_weight, combined_edge), dim=-1)  # shape (num_edges, 1+k)
 
-        # convert masks to torch tensors (CPU) and ensure bool dtype
-        edge_mask_t = torch.tensor(edge_mask, dtype=torch.bool) if edge_mask is not None else torch.ones(num_edges, dtype=torch.bool)
-        train_mask_t = torch.tensor(train_mask, dtype=torch.bool) if train_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
-        valide_mask_t = torch.tensor(valide_mask, dtype=torch.bool) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
-        test_mask_t = torch.tensor(test_mask, dtype=torch.bool) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        # # convert masks to torch tensors (CPU) and ensure bool dtype
+        # edge_mask_t = torch.tensor(edge_mask, dtype=torch.bool) if edge_mask is not None else torch.ones(num_edges, dtype=torch.bool)
+        # train_mask_t = torch.tensor(train_mask, dtype=torch.bool) if train_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        # valide_mask_t = torch.tensor(valide_mask, dtype=torch.bool) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        # test_mask_t = torch.tensor(test_mask, dtype=torch.bool) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+
+        edge_mask_t = to_bool_tensor(edge_mask) if edge_mask is not None else torch.ones(num_edges, dtype=torch.bool)
+        train_mask_t = to_bool_tensor(train_mask) if train_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        valide_mask_t = to_bool_tensor(valide_mask) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        test_mask_t = to_bool_tensor(test_mask) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+
 
         # Finally move to device (self.device) in one place to avoid async cuda asserts
         if str(self.device).startswith("cuda"):
@@ -198,8 +212,12 @@ class GNN_prediction:
         self.save_path = self.config['model_path']
         self.num_edges = len(data.edge_attr)
 
-        self.train_mask = torch.tensor(data.train_mask, dtype=torch.bool)
-        self.valide_mask = torch.tensor(data.valide_mask, dtype=torch.bool)
+        # self.train_mask = torch.tensor(data.train_mask, dtype=torch.bool)
+        # self.valide_mask = torch.tensor(data.valide_mask, dtype=torch.bool)
+
+        self.train_mask = to_bool_tensor(data.train_mask)
+        mask_validate = to_bool_tensor(data_validate.edge_mask)
+
         self.test_mask = torch.tensor(data.test_mask, dtype=torch.bool)
 
         print("\n----- Training Started -----\n")
@@ -316,7 +334,9 @@ class GNN_prediction:
     def test(self,data,model_path):
         # self.model.load_state_dict(model_path)
         self.model.eval()
-        mask = torch.tensor(data.edge_mask, dtype=torch.bool)
+        # mask = torch.tensor(data.edge_mask, dtype=torch.bool)
+        mask = to_bool_tensor(data.edge_mask)
+
         edge_can_see = torch.logical_or(self.valide_mask, self.train_mask)
         with torch.no_grad():
             edge_predict = self.model(task_id=data.task_id,query_features=data.query_features, llm_features=data.llm_features, edge_index=data.edge_index,

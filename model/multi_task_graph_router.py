@@ -8,8 +8,10 @@ import json
 import re
 import yaml
 import os
+import ast
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 class graph_router_prediction:
     def __init__(self, router_data_path, llm_path, llm_embedding_path, config, wandb):
@@ -18,6 +20,7 @@ class graph_router_prediction:
         self.data_df = pd.read_csv(router_data_path)
         self.llm_description = loadjson(llm_path)
         self.llm_names = list(self.llm_description.keys())
+        print(self.llm_names)
         self.num_llms = len(self.llm_names)
         self.num_query = int(len(self.data_df) / self.num_llms)
         self.num_task = config['num_task']
@@ -138,25 +141,18 @@ class graph_router_prediction:
         self.task_embedding_list = []
 
         for inter in query_embedding_list_raw:
-            inter = re.sub(r'\s+', ', ', inter.strip())
-            try:
-                inter = json.loads(inter)
-            except:
-                inter = inter.replace("[[,", "[[")
-                inter = json.loads(inter)
+            inter = inter.strip()
+            inter = ast.literal_eval(inter)
             self.query_embedding_list.append(inter[0])
 
         for inter in task_embedding_list_raw:
-            inter = re.sub(r'\s+', ', ', inter.strip())
-            try:
-                inter = json.loads(inter)
-            except:
-                inter = inter.replace("[[,", "[[")
-                inter = json.loads(inter)
+            inter = inter.strip()
+            inter = ast.literal_eval(inter)
             self.task_embedding_list.append(inter[0])
 
         self.query_embedding_list = np.array(self.query_embedding_list)[unique_index_list]
         self.task_embedding_list = np.array(self.task_embedding_list)[unique_index_list]
+
 
         self.effect_list = np.array(self.data_df['effect'].tolist())
         self.cost_list = np.array(self.data_df['cost'].tolist())
