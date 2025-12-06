@@ -48,9 +48,9 @@ class data_building:
         # Normalize cost according to task
         df['cost'] = df.groupby('task_id')['cost'].transform(lambda x: (x - x.min()) / (x.max() - x.min()))
 
-        df.to_csv(self.config['saved_router_data_path'], index=False)
+        df.to_csv(os.path.join(self.config['data_dir'], "router_data.csv"), index=False)
         llm_description_embedding = get_embedding(self.all_llm_description)
-        savepkl(llm_description_embedding, self.config['llm_embedding_path'])
+        savepkl(llm_description_embedding, os.path.join(self.config['data_dir'], "llm_description_embedding.pkl"))
 
 
 if __name__ == "__main__":
@@ -59,4 +59,10 @@ if __name__ == "__main__":
     with open("configs/config.yaml", 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
     os.environ["TOGETHERAI_API_KEY"] = config["api_key"]
-    data_building(qa_path=config['unified_qa_data_path'],llm_path=config['llm_description_path'],config=config)
+
+    data_dir = config['data_dir']
+    data_building(
+                qa_path=os.path.join(data_dir, 'unified_data.csv'),
+                llm_path=os.path.join(data_dir, 'LLM_Descriptions.json'),
+                config=config
+                )

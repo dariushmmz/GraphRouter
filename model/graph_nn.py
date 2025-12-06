@@ -5,11 +5,13 @@ from torch_geometric.data import Data
 import torch.nn as nn
 from torch.optim import AdamW
 from sklearn.metrics import f1_score
+import os
+import matplotlib.pyplot as plt
 
-def to_bool_tensor(x):
+def to_bool_tensor(x, device='cuda'):
     if isinstance(x, torch.Tensor):
         return x.detach().clone().bool()
-    return torch.tensor(x, dtype=torch.bool)
+    return torch.tensor(x, dtype=torch.bool).to(device)
 
 
 class FeatureAlign(nn.Module):
@@ -59,7 +61,39 @@ class EncoderDecoderNet(torch.nn.Module):
         return edge_predict
 
 
-# جایگزین قسمت form_data.formulation در graph_nn.py
+# class form_data:
+
+#     def __init__(self,device):
+#         self.device = device
+
+#     def formulation(self,task_id,query_feature,llm_feature,org_node,des_node,edge_feature,label,edge_mask,combined_edge,train_mask,valide_mask,test_mask):
+
+#         query_features = torch.tensor(query_feature, dtype=torch.float).to(self.device)
+#         llm_features = torch.tensor(llm_feature, dtype=torch.float).to(self.device)
+#         task_id=torch.tensor(task_id, dtype=torch.float).to(self.device)
+#         query_indices = list(range(len(query_features)))
+#         llm_indices = [i + len(query_indices) for i in range(len(llm_features))]
+#         des_node=[(i+1 + org_node[-1]) for i in des_node]
+#         edge_index = torch.tensor([org_node, des_node], dtype=torch.long).to(self.device)
+#         edge_weight = torch.tensor(edge_feature, dtype=torch.float).reshape(-1,1).to(self.device)
+#         combined_edge=torch.tensor(combined_edge, dtype=torch.float).reshape(-1,2).to(self.device)
+#         # combined_edge=torch.cat((edge_weight, combined_edge), dim=-1)
+#         # ensure number of rows match
+#         if combined_edge.shape[0] != edge_weight.shape[0]:
+#             # tile or slice to match
+#             min_rows = min(combined_edge.shape[0], edge_weight.shape[0])
+#             combined_edge = combined_edge[:min_rows]
+#             edge_weight = edge_weight[:min_rows]
+
+#         combined_edge = torch.cat((edge_weight, combined_edge), dim=-1)
+#         data = Data(task_id=task_id,query_features=query_features, llm_features=llm_features, edge_index=edge_index,
+#                         edge_attr=edge_weight,query_indices=query_indices, llm_indices=llm_indices,label=torch.tensor(label, dtype=torch.float).to(self.device),
+#                         edge_mask=edge_mask,combined_edge=combined_edge,
+#                     train_mask=train_mask,valide_mask=valide_mask,test_mask=test_mask)
+
+#         return data
+
+# # جایگزین قسمت form_data.formulation در graph_nn.py
 class form_data:
 
     def __init__(self,device):
@@ -149,10 +183,10 @@ class form_data:
         # valide_mask_t = torch.tensor(valide_mask, dtype=torch.bool) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
         # test_mask_t = torch.tensor(test_mask, dtype=torch.bool) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
 
-        edge_mask_t = to_bool_tensor(edge_mask) if edge_mask is not None else torch.ones(num_edges, dtype=torch.bool)
-        train_mask_t = to_bool_tensor(train_mask) if train_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
-        valide_mask_t = to_bool_tensor(valide_mask) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
-        test_mask_t = to_bool_tensor(test_mask) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        edge_mask_t = to_bool_tensor(edge_mask, device=self.device) if edge_mask is not None else torch.ones(num_edges, dtype=torch.bool)
+        train_mask_t = to_bool_tensor(train_mask, device=self.device) if train_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        valide_mask_t = to_bool_tensor(valide_mask, device=self.device) if valide_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
+        test_mask_t = to_bool_tensor(test_mask, device=self.device) if test_mask is not None else torch.zeros(num_edges, dtype=torch.bool)
 
 
         # Finally move to device (self.device) in one place to avoid async cuda asserts
@@ -191,14 +225,21 @@ class form_data:
         return data
 
 
-class GNN_prediction:
-    def __init__(self, query_feature_dim, llm_feature_dim,hidden_features_size,in_edges_size,wandb,config,device):
 
-        self.model = EncoderDecoderNet(query_feature_dim=query_feature_dim, llm_feature_dim=llm_feature_dim,
-                                        hidden_features=hidden_features_size,in_edges=in_edges_size).to(device)
+class GNN_prediction:
+    def __init__(self, query_feature_dim, llm_feature_dim, hidden_features_size,
+                 in_edges_size, wandb, config, device):
+
+        self.model = EncoderDecoderNet(
+            query_feature_dim=query_feature_dim,
+            llm_feature_dim=llm_feature_dim,
+            hidden_features=hidden_features_size,
+            in_edges=in_edges_size
+        ).to(device)
+
         self.wandb = wandb
         self.config = config
-        self.optimizer =AdamW(
+        self.optimizer = AdamW(
             self.model.parameters(),
             lr=self.config['learning_rate'],
             weight_decay=self.config['weight_decay']
@@ -208,17 +249,41 @@ class GNN_prediction:
 
     def train_validate(self, data, data_validate, data_for_test):
 
+        # ------------------------------
+        # Create unique folder for run
+        # ------------------------------
+        # timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # self.save_path = os.path.join(self.config["model_path"], f"run_{timestamp}")
+        self.save_path = f"model_path/best_model_{self.config["data_dir"].replace('data/', '')}_{self.config["scenario"].replace(' ', '')}"
+
+        if self.config["semantic_embeddings"]:
+            if os.path.exists(f"{self.config['data_dir']}/feedback/router_data.csv"):
+                self.save_path += "+feedback"
+
+        if self.config["feedback"]:
+            if os.path.exists(f"{self.config['data_dir']}/query_semantic_embeddings.pkl"):
+                self.save_path += "+semantic_embeddings"   
+
+        os.makedirs(self.save_path, exist_ok=True)
+
+        log_file = open(os.path.join(self.save_path, "training_log.txt"), "w")
+
+        # ----------------------------------------------
+        # Store metrics for visualization
+        # ----------------------------------------------
+        history = {
+            "train_loss": [],
+            "val_loss": [],
+            "val_f1": [],
+            "val_acc": []
+        }
+
         best_f1 = -1
-        self.save_path = self.config['model_path']
-        self.num_edges = len(data.edge_attr)
+        best_val_loss = float("inf")
 
-        # self.train_mask = torch.tensor(data.train_mask, dtype=torch.bool)
-        # self.valide_mask = torch.tensor(data.valide_mask, dtype=torch.bool)
-
-        self.train_mask = to_bool_tensor(data.train_mask)
-        mask_validate = to_bool_tensor(data_validate.edge_mask)
-
-        self.test_mask = torch.tensor(data.test_mask, dtype=torch.bool)
+        self.train_mask = torch.tensor(data.train_mask, dtype=torch.bool).to(self.device)
+        self.valide_mask = torch.tensor(data.valide_mask, dtype=torch.bool).to(self.device)
+        self.test_mask = torch.tensor(data.test_mask, dtype=torch.bool).to(self.device)
 
         print("\n----- Training Started -----\n")
 
@@ -228,17 +293,15 @@ class GNN_prediction:
             mask_train = data.edge_mask
 
             # ------------------------
-            #       TRAINING
+            # TRAINING
             # ------------------------
-            for inter in range(self.config['batch_size']):
+            for _ in range(self.config['batch_size']):
                 mask = mask_train.clone().bool().to(self.device)
-
-                random_mask = (torch.rand(mask.size()) < self.config['train_mask_rate']).bool()
+                random_mask = (torch.rand(mask.size()) < self.config['train_mask_rate']).bool().to(self.device)
                 random_mask = random_mask.to(self.device)
+
                 mask = torch.where(mask & random_mask, torch.tensor(False), mask).bool()
-                # mask = torch.where(mask & random_mask,
-                                # torch.zeros(1, dtype=torch.bool, device=mask.device),
-                                # mask).bool()
+
 
                 edge_can_see = torch.logical_and(~mask, self.train_mask)
 
@@ -261,10 +324,10 @@ class GNN_prediction:
             self.optimizer.step()
 
             # ------------------------
-            #    VALIDATION
+            # VALIDATION
             # ------------------------
             self.model.eval()
-            mask_validate = torch.tensor(data_validate.edge_mask, dtype=torch.bool)
+            mask_validate = torch.tensor(data_validate.edge_mask, dtype=torch.bool).to(self.device)
             edge_can_see = self.train_mask
 
             with torch.no_grad():
@@ -285,58 +348,82 @@ class GNN_prediction:
                 label_idx = torch.argmax(value_validate, 1)
 
                 correct = (observe_idx == label_idx).sum().item()
-                total = label_idx.size(0)
-                validate_accuracy = correct / total
+                val_acc = correct / label_idx.size(0)
 
                 f1 = f1_score(label_idx.cpu().numpy(), observe_idx.cpu().numpy(), average='macro')
 
-                loss_validate = self.criterion(
+                val_loss = self.criterion(
                     predicted_edges_validate.reshape(-1),
                     data_validate.label[mask_validate].reshape(-1)
                 )
 
             # ------------------------
-            #   BEST MODEL SAVE
+            # BEST MODEL SAVING
             # ------------------------
             if f1 > best_f1:
                 best_f1 = f1
-                torch.save(self.model.state_dict(), self.save_path)
+                torch.save(self.model.state_dict(), os.path.join(self.save_path, "best_f1.pt"))
+
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                torch.save(self.model.state_dict(), os.path.join(self.save_path, "best_val_loss.pt"))
+
+            # Always save last epoch
+            # torch.save(self.model.state_dict(), os.path.join(self.save_path, "last_epoch.pt"))
 
             # ------------------------
-            #        TEST
+            # TEST
             # ------------------------
-            test_result, test_loss = self.test(data_for_test, self.config['model_path'])
+            test_result, test_loss = self.test(data_for_test, self.save_path)
 
             # ------------------------
-            #        PRINT METRICS
+            # Console Print
             # ------------------------
-            print(f"\nEpoch {epoch+1}/{self.config['train_epoch']}")
-            print(f"  Train Loss      : {loss_mean.item():.6f}")
-            print(f"  Val Loss        : {loss_validate.item():.6f}")
-            print(f"  Val Accuracy    : {validate_accuracy:.4f}")
-            print(f"  Val Macro F1    : {f1:.4f}")
-            print(f"  Test Result     : {test_result:.6f}")
-            print(f"  Test Loss       : {test_loss.item():.6f}")
-            print(f"  Best F1 so far  : {best_f1:.4f}")
+            msg = (
+                f"\nEpoch {epoch+1}/{self.config['train_epoch']}\n"
+                f"Train Loss      : {loss_mean.item():.6f}\n"
+                f"Val Loss        : {val_loss.item():.6f}\n"
+                f"Val Accuracy    : {val_acc:.4f}\n"
+                f"Val Macro F1    : {f1:.4f}\n"
+                f"Test Result     : {test_result:.6f}\n"
+                f"Test Loss       : {test_loss.item():.6f}\n"
+                f"Best F1 so far  : {best_f1:.4f}\n"
+                f"Best Val Loss   : {best_val_loss:.4f}\n"
+            )
+            print(msg)
+            log_file.write(msg + "\n")
 
             # ------------------------
-            #     WANDB LOGGING
+            # Save history for plots
+            # ------------------------
+            history["train_loss"].append(loss_mean.item())
+            history["val_loss"].append(val_loss.item())
+            history["val_f1"].append(f1)
+            history["val_acc"].append(val_acc)
+
+            # ------------------------
+            # WANDB LOG
             # ------------------------
             self.wandb.log({
                 "train_loss": loss_mean,
-                "validate_loss": loss_validate,
-                "validate_accuracy": validate_accuracy,
+                "validate_loss": val_loss,
+                "validate_accuracy": val_acc,
                 "validate_f1": f1,
                 "test_loss": test_loss,
                 "test_result": test_result
             })
 
+        log_file.close()
+
+        # -----------------------------------
+        # Save plots after training completes
+        # -----------------------------------
+        self.plot_metrics(history)
+
     def test(self,data,model_path):
         # self.model.load_state_dict(model_path)
         self.model.eval()
-        # mask = torch.tensor(data.edge_mask, dtype=torch.bool)
-        mask = to_bool_tensor(data.edge_mask)
-
+        mask = torch.tensor(data.edge_mask, dtype=torch.bool).to(self.device)
         edge_can_see = torch.logical_or(self.valide_mask, self.train_mask)
         with torch.no_grad():
             edge_predict = self.model(task_id=data.task_id,query_features=data.query_features, llm_features=data.llm_features, edge_index=data.edge_index,
@@ -353,3 +440,27 @@ class GNN_prediction:
         # print("result_predict:", result, "result_golden:",result_golden)
 
         return result,loss_test
+        
+    # =======================================================
+    # PLOT METRICS
+    # =======================================================
+    def plot_metrics(self, history):
+        plt.figure()
+        plt.plot(history["train_loss"], label="Train Loss")
+        plt.plot(history["val_loss"], label="Val Loss")
+        plt.legend()
+        plt.title("Loss Curve")
+        plt.savefig(os.path.join(self.save_path, "loss_curve.png"))
+        plt.close()
+
+        plt.figure()
+        plt.plot(history["val_f1"])
+        plt.title("Validation F1")
+        plt.savefig(os.path.join(self.save_path, "f1_curve.png"))
+        plt.close()
+
+        plt.figure()
+        plt.plot(history["val_acc"])
+        plt.title("Validation Accuracy")
+        plt.savefig(os.path.join(self.save_path, "accuracy_curve.png"))
+        plt.close()

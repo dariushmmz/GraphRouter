@@ -9,9 +9,16 @@ import re
 import yaml
 import os
 import ast
+from scipy.special import softmax
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+import re
+
+def parse_embedding(raw):
+    # extract all float-like tokens from the string
+    nums = re.findall(r'[-+]?\d*\.\d+(?:[eE][-+]?\d+)?|[-+]?\d+(?:[eE][-+]?\d+)?', raw)
+    return [float(n) for n in nums]
 
 class graph_router_prediction:
     def __init__(self, router_data_path, llm_path, llm_embedding_path, config, wandb):
@@ -20,18 +27,23 @@ class graph_router_prediction:
         self.data_df = pd.read_csv(router_data_path)
         self.llm_description = loadjson(llm_path)
         self.llm_names = list(self.llm_description.keys())
-        print(self.llm_names)
         self.num_llms = len(self.llm_names)
         self.num_query = int(len(self.data_df) / self.num_llms)
         self.num_task = config['num_task']
+
+        self.semantic_embeddings = config['semantic_embeddings']
+        self.semantic_path = os.path.join(config['data_dir'], 'query_semantic_embeddings.pkl')
+
         self.set_seed(self.config['seed'])
         self.llm_description_embedding = loadpkl(llm_embedding_path)
         self.prepare_data_for_GNN()
         self.split_data()
         self.form_data = form_data(device)
 
+
         # Dynamically detect feature dimensions
         self.query_dim = self.query_embedding_list.shape[1]
+        print(self.llm_description_embedding.shape)
         self.llm_dim = self.llm_description_embedding.shape[1]
 
         # Automatically detect edge feature dimension
@@ -80,6 +92,7 @@ class graph_router_prediction:
             test_idx.extend(range(start_idx + (train_size + val_size) * self.num_llms,
                                   start_idx + (train_size + val_size + test_size) * self.num_llms))
 
+
         # ====================== Build combined_edge ======================
         # include feedback (normalized)
         if 'avg_feedback' in self.data_df.columns:
@@ -105,21 +118,42 @@ class graph_router_prediction:
                 axis=1
             )
 
-            # feedback_list = np.zeros_like(self.data_df['effect'].tolist(), dtype=float)
-        print("\n=================")
-        print(self.combined_edge.shape)
-        print("=================\n")
 
-        self.scenario = self.config['scenario']
+
+        effect_n = (self.effect_list - self.effect_list.min()) / (self.effect_list.max() - self.effect_list.min())
+        cost_n   = (self.cost_list   - self.cost_list.min())   / (self.cost_list.max()   - self.cost_list.min())
+
+        # وزن‌دهی سناریو
         if self.scenario == "Performance First":
-            self.effect_list = 1.0 * self.effect_list - 0.0 * self.cost_list
+            self.effect_list = 1.0 * effect_n - 0.0 * cost_n
         elif self.scenario == "Balance":
-            self.effect_list = 0.5 * self.effect_list - 0.5 * self.cost_list
+            self.effect_list = 0.6 * effect_n - 0.4 * cost_n
         else:
-            self.effect_list = 0.2 * self.effect_list - 0.8 * self.cost_list
+            self.effect_list = 0.3 * effect_n - 0.7 * cost_n
 
-        effect_re = self.effect_list.reshape(-1, self.num_llms)
-        self.label = np.eye(self.num_llms)[np.argmax(effect_re, axis=1)].reshape(-1, 1)
+        # --- Minor shifting to remove negatives ---
+        self.effect_list = self.effect_list - self.effect_list.min() + 1e-6
+
+        # ===================================================================
+        # 🚀  Feedback Integration (real improvement happens here)
+        # ===================================================================
+        if 'avg_feedback' in self.data_df.columns:
+            # Normalize feedback
+            feedback_n = (feedback_list - feedback_list.min()) / (feedback_list.max() - feedback_list.min() + 1e-12)
+            # Impact of feedback (α: between 0.2..0.4 optimal)
+            alpha = 0.30
+            self.effect_list = (1 - alpha) * self.effect_list + alpha * feedback_n
+
+
+        # --- Softmax ---
+        self.effect_list = softmax(self.effect_list / 0.15)   # temperature scaling for better separation
+                                        # 0.15 ~ makes scores sharper
+
+        # effect_re = self.effect_list.reshape(-1, self.num_llms)
+        # self.label = np.eye(self.num_llms)[np.argmax(effect_re, axis=1)].reshape(-1, 1)
+        smoothing=0.05
+        self.label = (1 - smoothing) * self.effect_list + (smoothing / len(self.effect_list))
+
         self.edge_org_id = [num for num in range(self.num_query) for _ in range(self.num_llms)]
         self.edge_des_id = list(range(self.edge_org_id[0], self.edge_org_id[0] + self.num_llms)) * self.num_query
 
@@ -141,26 +175,22 @@ class graph_router_prediction:
         self.task_embedding_list = []
 
         for inter in query_embedding_list_raw:
-            inter = inter.strip()
-            inter = ast.literal_eval(inter)
-            self.query_embedding_list.append(inter[0])
+            emb = parse_embedding(inter)
+            self.query_embedding_list.append(emb)
 
         for inter in task_embedding_list_raw:
-            inter = inter.strip()
-            inter = ast.literal_eval(inter)
-            self.task_embedding_list.append(inter[0])
+            emb = parse_embedding(inter)
+            self.task_embedding_list.append(emb)
 
         self.query_embedding_list = np.array(self.query_embedding_list)[unique_index_list]
         self.task_embedding_list = np.array(self.task_embedding_list)[unique_index_list]
-
 
         self.effect_list = np.array(self.data_df['effect'].tolist())
         self.cost_list = np.array(self.data_df['cost'].tolist())
 
         # ====================== Add semantic embeddings if available ======================
-        semantic_path = os.path.join("data", "query_semantic_embeddings.pkl")
-        if os.path.exists(semantic_path):
-            semantic_embeddings = loadpkl(semantic_path)
+        if self.semantic_embeddings and os.path.exists(self.semantic_path):
+            semantic_embeddings = loadpkl(self.semantic_path)
             if semantic_embeddings.shape[0] == self.query_embedding_list.shape[0]:
                 self.query_embedding_list = np.concatenate(
                     [self.query_embedding_list, semantic_embeddings], axis=1
@@ -224,12 +254,12 @@ class graph_router_prediction:
             data_for_test=self.data_for_test
         )
 
-    def test_GNN(self):
-        predicted_result = self.GNN_predict.test(
-            data=self.data_for_test,
-            model_path=self.config['model_path']
-        )
-        return predicted_result
+    # def test_GNN(self):
+    #     predicted_result = self.GNN_predict.test(
+    #         data=self.data_for_test,
+    #         model_path=self.config['model_path']
+    #     )
+    #     return predicted_result
 
 
 if __name__ == "__main__":
@@ -241,10 +271,21 @@ if __name__ == "__main__":
     wandb.login(key=wandb_key)
     wandb.init(project="graph_router")
 
+    data_dir = config['data_dir']
+
+    router_data_path = os.path.join(data_dir, 'router_data.csv')
+    if config['feedback']:
+        router_data_path = os.path.join(data_dir, 'feedback/router_data.csv')
+        if not os.path.exists(router_data_path):
+            print("[INFO] No feedback found")
+            router_data_path = os.path.join(data_dir, 'router_data.csv')
+
+
     graph_router_prediction(
-        router_data_path=config['saved_router_data_path'],
-        llm_path=config['llm_description_path'],
-        llm_embedding_path=config['llm_embedding_path'],
+        
+        router_data_path=router_data_path,
+        llm_path=os.path.join(data_dir, 'LLM_Descriptions.json'),
+        llm_embedding_path=os.path.join(data_dir, "llm_description_embedding.pkl"),
         config=config,
         wandb=wandb
     )

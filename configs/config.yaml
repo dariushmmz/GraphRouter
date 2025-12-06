@@ -1,18 +1,25 @@
 # Config parameters for router data construction:
 api_key: "613827ba163126d626fa4db06f7c370d80183a0e1b3d8471b36152219ef82ee2"
-unified_qa_data_path: 'data/unified_nlgPersian_data.csv'
-llm_description_path: 'configs/LLM_Descriptions_nlgFA.json'
-llm_embedding_path: 'configs/llm_description_embedding_nlgFA.pkl'
-saved_router_data_path: 'data/router_data_nlgFA.csv'
+
+# unified_qa_data_path: 'data/MIZAN_PersianNLG/unified_data.csv'
+# saved_router_data_path: 'data/MIZAN_PersianNLG/router_data.csv'
+# llm_description_path: 'data/MIZAN_PersianNLG/LLM_Descriptions.json'
+# llm_embedding_path: 'data/MIZAN_PersianNLG/llm_description_embedding.pkl'
+# semantic_path: 'data/MIZAN_PersianNLG/query_semantic_embeddings.pkl'
+
+data_dir: 'data/MIZAN_PersianNLG'
 query_response_length: 512
 
 
+
 # Config parameters for graph_router training:
+scenario: "Cost First" # "Balance" #"Performance First" # "Cost First"
+semantic_embeddings: True
+feedback: True
+
 seed: 1881
 wandb_key: 'e57bbed44751c352b139fcd559df80bb3796b68b'
-model_path: 'model_path/model.pth'
-train_epoch: 1000
-scenario: "Cost First" # "Balance" #"Performance First" # "Cost First"
+# model_path: 'model_path/model.pth' # +semantic_embeddings / +feedback
 llm_num: 10
 learning_rate: 0.0003
 weight_decay: 0.0001

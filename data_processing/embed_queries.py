@@ -1,0 +1,85 @@
+# embed_queries.py
+import os
+import argparse
+import pickle
+from tqdm import tqdm
+import numpy as np
+import pandas as pd
+from sentence_transformers import SentenceTransformer
+
+def load_router_csv(path="data/router_data.csv"):
+    df = pd.read_csv(path)
+    return df
+
+def unique_queries_from_router(df, num_llms):
+    """
+    Given router_data where rows = num_queries * num_llms,
+    return the unique query indices (starting row indices for each query)
+    and the query texts corresponding to them.
+    """
+    total = len(df)
+    if total % num_llms != 0:
+        raise ValueError(f"rows ({total}) not divisible by num_llms ({num_llms})")
+    unique_idxs = list(range(0, total, num_llms))
+    queries = [df.loc[i, 'query'] for i in unique_idxs]
+    return unique_idxs, queries
+
+def compute_embeddings(queries, model_name="paraphrase-multilingual-MiniLM-L12-v2", batch_size=64, device=None):
+    """
+    Compute sentence embeddings using sentence-transformers.
+    Returns numpy array shape (len(queries), dim)
+    """
+    print("Loading model:", model_name)
+    model = SentenceTransformer(model_name, device=device)
+    all_emb = []
+    for i in tqdm(range(0, len(queries), batch_size), desc="Embedding batches"):
+        batch = queries[i:i+batch_size]
+        emb = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
+        all_emb.append(emb)
+    all_emb = np.vstack(all_emb)
+    return all_emb
+
+def save_embeddings(arr, out_path="data/query_semantic_embeddings.pkl"):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as f:
+        pickle.dump(arr, f)
+    print("Saved embeddings to", out_path)
+
+def main(router_csv="data/router_data.csv", llm_desc_path="configs/LLM_Descriptions.json",
+         model_name="paraphrase-multilingual-MiniLM-L12-v2", batch_size=64, out_path="data/query_semantic_embeddings.pkl",
+         device=None):
+    df = load_router_csv(router_csv)
+    # determine num_llms from LLM_Descriptions.json
+    import json
+    with open(llm_desc_path, "r", encoding="utf-8") as f:
+        llm_names = list(json.load(f).keys())
+    num_llms = len(llm_names)
+
+    unique_idxs, queries = unique_queries_from_router(df, num_llms)
+    print(f"Found {len(queries)} unique queries, using {model_name} to embed them.")
+
+    embs = compute_embeddings(queries, model_name=model_name, batch_size=batch_size, device=device)
+    print("Embeddings shape:", embs.shape)
+
+    save_embeddings(embs, out_path)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root_dir", default="data/MIZAN_PersianNLG")
+    parser.add_argument("--model", default="paraphrase-multilingual-MiniLM-L12-v2")
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--device", default=None, help="cpu or cuda")
+    args = parser.parse_args()
+
+    router_csv = os.path.join(args.root_dir, "router_data.csv")
+    llm_desc = os.path.join(args.root_dir, "LLM_Descriptions.json")
+    out = os.path.join(args.root_dir, "query_semantic_embeddings.pkl")
+     
+
+    main(router_csv=router_csv, llm_desc_path=llm_desc, model_name=args.model, batch_size=args.batch_size, out_path=out, device=args.device)
+
+
+'''!python embed_queries.py --root_dir  data/MIZAN_PersianNLG \
+    --model "paraphrase-multilingual-MiniLM-L12-v2" \
+    --batch_size 64 \
+    --device cuda'''
