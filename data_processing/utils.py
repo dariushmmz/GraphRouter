@@ -13,8 +13,20 @@ from sklearn.preprocessing import StandardScaler
 from bert_score import score
 import litellm
 
+
+import os
+import requests
+
+
 # Initialize the sentence transformer model
 model = SentenceTransformer('all-MiniLM-L6-v2')
+
+
+from dotenv import load_dotenv
+load_dotenv() 
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 # File I/O functions
@@ -214,39 +226,89 @@ def get_embedding(instructions: List[str]) -> np.ndarray:
 
 
 
-# LLM prompting
+def _openrouter_completion(
+    model: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: Optional[float],
+) -> str:
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        # Optional but recommended by OpenRouter
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "LLM Selection Project",
+    }
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+    if top_p is not None:
+        payload["top_p"] = top_p
+
+    response = requests.post(
+        OPENROUTER_URL,
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=60,
+    )
+
+    response.raise_for_status()
+    data = response.json()
+
+    return data["choices"][0]["message"]["content"]
+
+
 def model_prompting(
-        llm_model: str,
-        prompt: str,
-        return_num: Optional[int] = 1,
-        max_token_num: Optional[int] = 512,
-        temperature: Optional[float] = 0.0,
-        top_p: Optional[float] = None,
-        stream: Optional[bool] = None,
+    llm_model: str,
+    prompt: str,
+    return_num: Optional[int] = 1,
+    max_token_num: Optional[int] = 512,
+    temperature: Optional[float] = 0.0,
+    top_p: Optional[float] = None,
+    stream: Optional[bool] = None,
 ) -> str:
     """
-    Get a response from an LLM model using LiteLLM.
-
-    Args:
-        llm_model: Name of the model to use
-        prompt: Input prompt text
-        return_num: Number of completions to generate
-        max_token_num: Maximum number of tokens to generate
-        temperature: Sampling temperature
-        top_p: Top-p sampling parameter
-        stream: Whether to stream the response
-
-    Returns:
-        Generated text response
+    Get a response from an LLM model.
+    Primary: LiteLLM
+    Fallback: OpenRouter
     """
-    completion = litellm.completion(
-        model=llm_model,
-        messages=[{'role': 'user', 'content': prompt}],
-        max_tokens=max_token_num,
-        n=return_num,
-        top_p=top_p,
-        temperature=temperature,
-        stream=stream,
-    )
-    content = completion.choices[0].message.content
-    return content
+
+    # -------- Primary: LiteLLM --------
+    try:
+        completion = litellm.completion(
+            model=llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_token_num,
+            n=return_num,
+            top_p=top_p,
+            temperature=temperature,
+            stream=stream,
+        )
+        return completion.choices[0].message.content
+
+    except Exception as e:
+        # You can narrow this to specific LiteLLM exceptions if desired
+        print(f"[LiteLLM failed] {e}")
+        print("[Fallback] Trying OpenRouter...")
+
+    # -------- Fallback: OpenRouter --------
+    try:
+        return _openrouter_completion(
+            model=llm_model,
+            prompt=prompt,
+            max_tokens=max_token_num,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Both LiteLLM and OpenRouter failed for model '{llm_model}'. "
+            f"Last error: {e}"
+        )

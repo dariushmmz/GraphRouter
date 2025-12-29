@@ -267,7 +267,10 @@ if __name__ == "__main__":
     with open("configs/config.yaml", 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
 
-    wandb_key = config['wandb_key']
+    from dotenv import load_dotenv
+    load_dotenv() 
+   
+    wandb_key =  os.getenv("wandb_key")
     wandb.login(key=wandb_key)
     wandb.init(project="graph_router")
 
