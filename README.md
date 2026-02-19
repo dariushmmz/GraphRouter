@@ -1,5 +1,6 @@
-## 📌Preliminary
+## 📌 Preliminary
 
+**GraphRouter** is a graph-based router for selecting among multiple LLMs per query. The model learns to route queries to the best LLM under configurable scenarios (**Performance First**, **Balance**, **Cost First**) using a GNN over query–LLM edges with task and cost/effect features.
 
 ### Environment Setup
 
@@ -18,119 +19,178 @@ source venv/bin/activate
 
 # Install dependencies
 uv sync
+```
 
-
-#### Option 2: Using conda (Original)
+#### Option 2: Using pip / pyproject.toml
 
 ```shell
-# create a new environment
+pip install -e .
+```
+
+#### Option 3: Using conda
+
+```shell
 conda create -n graphrouter python=3.10
 conda activate graphrouter
 
-# install pytorch. Modify the command to align with your own CUDA version.
-pip3 install torch  --index-url https://download.pytorch.org/whl/cu118
+# Install PyTorch (modify for your CUDA version)
+pip3 install torch --index-url https://download.pytorch.org/whl/cu118
 
-# install related libraries
-pip install -r requirements.txt
+# Install project
+pip install -e .
 ```
 
-### Dataset Preparation
+Set API keys for LLM providers (Together, OpenRouter, etc.) in `.env` or in `configs/config.yaml` as needed for data construction and training.
 
-First, generate 'data/unified_qa_data.csv'.
+---
+
+## Dataset Preparation
+
+Pipeline order:
+
+1. **Unify data** → `unified_data.csv`
+2. **Build router data** (LLM calls, rewards, costs) → `router_data.csv`
+3. **(Optional) Add OMS metrics** → updates `router_data.csv` with RQS/OMS and overwrites `effect`
+
+### Step 1: Generate `unified_data.csv`
+
+Set `data_dir` in `configs/config.yaml` to your dataset folder (e.g. `data/GSM8K`). The script uses the last segment of `data_dir` as the task name (e.g. `GSM8K`).
 
 ```bash
 python data_processing/multidata_unify.py
 ```
-Then, generate `data/router_data.csv` and `configs/llm_description_embedding.pkl` by setting your api_key in `configs/config.yaml`.
+
+Output: `{data_dir}/unified_data.csv` (e.g. `data/GSM8K/unified_data.csv`).
+
+### Step 2: Generate `router_data.csv`
+
+Uses `unified_data.csv`, calls each configured LLM per query, and computes reward and cost. Expects `LLM_Descriptions.json` (e.g. under `configs/` or your data folder). Set `data_dir` and API keys (e.g. in `.env`: `api_key`, `openrouter_api_key`).
 
 ```bash
 python data_processing/construct_router_data.py
 ```
 
-For your convenience, we provide download links for the 'unified_qa_data.csv' and 'router_data.csv' files we generated. Please download them and put them in `data` folder.
+Output: `{data_dir}/router_data.csv` and `configs/llm_description_embedding.pkl`. If using feedback, router data can be under `{data_dir}/feedback/router_data.csv`.
 
-[unified_qa_data.csv](https://drive.google.com/file/d/1__SY7UScvX1xPWeX1NK6ZulLMdZTqBcI/view?usp=share_link)
-[router_data.csv](https://drive.google.com/file/d/1YYn-BV-5s2amh6mKLqKMR0H__JB-CKU4/view?usp=share_link)
+### Step 3 (Optional): Add OMS metrics
 
-## ⭐Experiments
-
-### Training and Evaluation
-
-Run experiments and print/save evaluation results on metrics Performance, Cost, and Reward. You can edit the hyperparameters in `configs/config.yaml` or using your own config_file.
+Adds RQS (reasoning quality) and OMS (exact match + reasoning) and overwrites `effect` in the router CSV. Edit the `data_dir` list at the bottom of the script to point to your `router_data.csv` path.
 
 ```bash
-python run_exp.py --config_file [config]
+python data_processing/oms_metric.py
 ```
 
-## 🔍Inference
+### Pre-built data
 
-### Running Inference on Existing Queries
+For convenience, pre-generated files can be downloaded and placed in the `data` folder:
 
-Use `inference.py` to run inference on queries from the existing dataset:
+- [unified_qa_data.csv](https://drive.google.com/file/d/1__SY7UScvX1xPWeX1NK6ZulLMdZTqBcI/view?usp=share_link)
+- [router_data.csv](https://drive.google.com/file/d/1YYn-BV-5s2amh6mKLqKMR0H__JB-CKU4/view?usp=share_link)
+
+---
+
+## ⭐ Experiments
+
+### Training
+
+Run training with `configs/config.yaml` (or your own config):
 
 ```bash
-# Run inference on a specific query ID (default: 0)
-python inference.py --query_id 0
+python run_exp.py --config_file configs/config.yaml
+```
 
-# Run inference on query ID 5
-python inference.py --query_id 5
+Set `data_dir` to the directory containing `router_data.csv` (or `feedback/router_data.csv` when `feedback: true`). Training uses Weights & Biases when `wandb_key` is set (in config or env). Key options in `configs/config.yaml`: `model_path`, `scenario`, `llm_num`, `embedding_dim`, `edge_dim`, `split_ratio`, `train_epoch`, `learning_rate`, `batch_size`, etc.
+
+### Config overview (`configs/config.yaml`)
+
+| Parameter | Description |
+|-----------|-------------|
+| `data_dir` | Dataset root (e.g. `data/GSM8K`). |
+| `query_response_length` | Max response length for LLM calls. |
+| `model_path` | Path to trained model for inference. |
+| `feedback` | If true, use `feedback/router_data.csv` when present. |
+| `scenario` | `Performance First`, `Balance`, or `Cost First`. |
+| `llm_num` | Number of LLMs (must match data and LLM_Descriptions). |
+| `embedding_dim`, `edge_dim` | GNN hidden and edge feature dimensions. |
+| `split_ratio` | Train/val/test ratio, e.g. `[0.7, 0.1, 0.2]`. |
+| `train_epoch`, `learning_rate`, `weight_decay`, `batch_size` | Training hyperparameters. |
+
+---
+
+## 🔍 Inference
+
+### Running inference on a query from the dataset
+
+Use `inference.py` to run the trained router on a **single query index** from `router_data.csv`:
+
+```bash
+# Query index 0 (default)
+python inference.py --config_file configs/config.yaml --id 0
+
+# Query index 5
+python inference.py --config_file configs/config.yaml --id 5
 ```
 
 **Arguments:**
-- `--query_id`: Query index from the dataset (default: 0)
 
-### Running Inference on New Queries
+- `--config_file`: Path to YAML config (default: `configs/config.yaml`).
+- `--id`: Query index (integer). The script uses the block of rows for that query (one row per LLM).
+- `--adaptive_updater`: If set, runs the adaptive feedback updater after inference.
 
-Use `inference_withQuery.py` to run inference on your own custom queries:
+Ensure `model_path`, `data_dir`, `scenario`, `llm_num`, `embedding_dim`, and `edge_dim` in the config match the trained model.
 
-```bash
-# Run inference with a custom query
-python inference_withQuery.py --input_text "What is the capital of France?" --task_id "alpaca_data"
+### Output
 
-# Run inference with another custom query
-python inference_withQuery.py --input_text "Explain quantum computing" --task_id "alpaca_data"
+The script will:
+
+1. Load the trained GraphRouter model from `model_path`.
+2. Run inference for the given query and print **Top-3 predicted LLMs** and **Top-3 ground-truth LLMs** with scores.
+3. Save an interactive HTML plot under `data/results/{task_id}/llm_scores_query_{id}.html`.
+
+---
+
+## Project structure (main entries)
+
+```
+configs/
+  config.yaml                  # Main config
+  LLM_Descriptions.json         # LLM names and descriptions
+  llm_description_embedding.pkl # Precomputed LLM embeddings
+
+data_processing/
+  multidata_unify.py           # Step 1: build unified_data.csv
+  construct_router_data.py     # Step 2: build router_data.csv
+  oms_metric.py                # Step 3 (optional): add OMS metrics
+  llm_engine.py                # LLM API and evaluation
+  utils.py                     # Embeddings, I/O, parsing
+  instructions.py              # Task instructions (e.g. MATH, GSM8K)
+  delayed_reward.py            # Adaptive feedback updater
+
+model/
+  multi_task_graph_router.py   # Router: training + infer_single_query()
+  graph_nn.py                  # GNN (EncoderDecoderNet, form_data)
+
+inference.py                   # Run inference for one query (--id)
+run_exp.py                     # Run training
 ```
 
-**Arguments:**
-- `--input_text`: Your custom query text (default: "Name three planets in our solar system that have rings")
-- `--task_id`: Task identifier from the dataset (default: "alpaca_data")
+---
 
-**Available task IDs:**
-- `"alpaca_data"` - General instruction following
-- `"GSM8K"` - Math word problems
-- `"multi_news"` - News summarization
-- `"SQUAD"` - Question answering
+## Tricks for adapting GraphRouter to other tasks and datasets
 
-### Understanding the Output
+1. **Embedding normalization**  
+   Check whether input embeddings are normalized; on some datasets, skipping normalization can hurt performance.
 
-Both inference scripts will:
-1. Load the trained GraphRouter model
-2. Process your query through the graph neural network
-3. Return the best LLM recommendation and scores for all available LLMs
-4. Display an interactive plot showing LLM scores across different scenarios
+2. **Network initialization**  
+   Try different seeds or initialization schemes.
 
-The output includes:
-- **Best LLM**: The recommended LLM for your query
-- **Scores**: Confidence scores for all available LLMs
-- **Visualization**: Interactive bar chart showing LLM performance
+3. **Model saving strategy**  
+   Save checkpoints by best validation performance rather than only accuracy when that works better for your task.
 
-### Tricks for Adapting GraphRouter to Other Tasks and Datasets
+4. **Learning rate**  
+   Tune learning rate; a slightly higher value can help avoid local optima and improve stability.
 
-1. **Embedding Normalization**  
-   - Check whether input embeddings are normalized.  
-   - On some datasets, skipping normalization leads to suboptimal results.  
-
-2. **Network Initialization**  
-   - Experiment with different initialization methods.  
-   - Try varying random seeds or using alternative initialization schemes.  
-
-3. **Model Saving Strategy**  
-   - Instead of saving models based on highest accuracy, save checkpoints with the best evaluation set performance.  
-   - This can yield better results on certain tasks.  
-
-4. **Learning Rate Tuning**  
-   - Adjust learning rate carefully.  
-   - Slightly increasing it may help avoid local optima and improve stability.  
+---
 
 ## Citation
 
@@ -142,3 +202,6 @@ The output includes:
   year={2024}
 }
 ```
+
+- **Repository**: [https://github.com/ulab-uiuc/GraphRouter](https://github.com/ulab-uiuc/GraphRouter)  
+- **Documentation**: [https://ulab-uiuc.github.io/GraphRouter/](https://ulab-uiuc.github.io/GraphRouter/)

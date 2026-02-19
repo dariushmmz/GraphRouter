@@ -3160,3 +3160,9 @@
 {"timestamp": 1765006642.4993036, "query_id": 1053, "LLM": "Gemma-3N (e4b)", "Score": 1.0, "auto": true}
 {"timestamp": 1765006642.5035026, "query_id": 1053, "LLM": "LLlama-3.1 (8B)", "Score": 4.0, "auto": true}
 {"timestamp": 1765006642.5035026, "query_id": 1053, "LLM": "LLlama-3.1 (8B)", "Score": 4.0, "auto": true}
+{"timestamp": 1771262706.2847347, "query_id": 0, "LLM": "Gemma-3N (e4b)", "Score": 0.0}
+{"timestamp": 1771262734.384898, "query_id": 0, "LLM": "Qwen-2.5 (7b)", "Score": 0.0}
+{"timestamp": 1771262854.972655, "query_id": 0, "LLM": "Qwen-2.5 (7b)", "Score": 0.0}
+{"timestamp": 1771262932.1864777, "query_id": 0, "LLM": "Gemma-3N (e4b)", "Score": 0.0}
+{"timestamp": 1771263018.6272032, "query_id": 0, "LLM": "Mistral-7b", "Score": 0.0}
+{"timestamp": 1771263388.9390051, "query_id": 0, "LLM": "Gemma-3N (e4b)", "Score": 0.0}

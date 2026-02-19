@@ -18,7 +18,7 @@ with open("data/config.yaml", 'r', encoding='utf-8') as file:
 
 data_dir = config['data_dir']
 ROUTER_DATA_PATH = os.path.join(data_dir, 'router_data.csv')
-LLM_EMBEDDING_PATH = os.path.join(data_dir, 'llm_description_embedding.pkl')
+LLM_EMBEDDING_PATH = os.path.join(data_dir.replace('data', 'configs'), 'llm_description_embedding.pkl')
 SEMANTIC_EMBEDDING_PATH = os.path.join(data_dir, 'query_semantic_embeddings.pkl')
 
 if config['feedback']:

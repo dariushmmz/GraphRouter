@@ -64,22 +64,22 @@ def main(router_csv="data/router_data.csv", llm_desc_path="configs/LLM_Descripti
     save_embeddings(embs, out_path)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root_dir", default="data/MIZAN_PersianNLG")
-    parser.add_argument("--model", default="paraphrase-multilingual-MiniLM-L12-v2")
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--device", default=None, help="cpu or cuda")
-    args = parser.parse_args()
+    import yaml
+    with open('configs/config.yaml', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
 
-    router_csv = os.path.join(args.root_dir, "router_data.csv")
-    llm_desc = os.path.join(args.root_dir, "LLM_Descriptions.json")
-    out = os.path.join(args.root_dir, "query_semantic_embeddings.pkl")
+    root_dir = config['data_dir']
+
+    model = "paraphrase-multilingual-MiniLM-L12-v2"
+    batch_size = 64
+
+    import torch
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    router_csv = os.path.join(root_dir, "router_data.csv")
+    llm_desc = os.path.join(root_dir, "LLM_Descriptions.json")
+    out = os.path.join(root_dir, "query_semantic_embeddings.pkl")
      
 
-    main(router_csv=router_csv, llm_desc_path=llm_desc, model_name=args.model, batch_size=args.batch_size, out_path=out, device=args.device)
+    main(router_csv=router_csv, llm_desc_path=llm_desc, model_name=model, batch_size=batch_size, out_path=out, device=device)
 
-
-'''!python embed_queries.py --root_dir  data/MIZAN_PersianNLG \
-    --model "paraphrase-multilingual-MiniLM-L12-v2" \
-    --batch_size 64 \
-    --device cuda'''

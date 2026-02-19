@@ -8,6 +8,7 @@ clean_venv/
 .venv/
 uv.lock
 
+venv_clean/
 
 # Python cache
 __pycache__/
@@ -32,7 +33,15 @@ wandb/
 *.pkl
 *.pth
 
+
 # Data files (if large)
 data/*.csv
 data/*.parquet
 data/*.json
+
+#notebooks
+*.ipynb
+data/gt_calcuation.ipynb
+
+.env
+test.py

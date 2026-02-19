@@ -1,0 +1,16 @@
+{"timestamp": 1771224693.3810725, "query_id": 1, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771225047.0690737, "query_id": 2, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771229260.0488148, "query_id": 2, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771231567.3787937, "query_id": 2, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771231646.8302822, "query_id": 2, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771231868.6965678, "query_id": 2, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 2.0}
+{"timestamp": 1771232817.2454538, "query_id": 2, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 2.0}
+{"timestamp": 1771260956.3439622, "query_id": 2, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771261109.9275596, "query_id": 1, "LLM": "Mixtral-8x7B Instruct v0.1", "Score": 0.0}
+{"timestamp": 1771261591.3272521, "query_id": 2, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771261870.172071, "query_id": 0, "LLM": "Meta Llama 3.1 70B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771263447.1088347, "query_id": 0, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771269665.9026372, "query_id": 0, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771269727.830131, "query_id": 0, "LLM": "Meta Llama 3.1 70B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771270016.5235014, "query_id": 0, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}
+{"timestamp": 1771274978.9634166, "query_id": 0, "LLM": "Qwen2.5 7B Instruct Turbo", "Score": 0.0}

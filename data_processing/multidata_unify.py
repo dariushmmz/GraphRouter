@@ -1,130 +1,208 @@
-import pandas as pd
-from utils import loadjson, get_embedding, savepkl, loadpkl
+import os
 import yaml
+import pandas as pd
+from typing import Dict, List, Optional, Union
+import re
 
-def generate_unified_qa_dataset(output_path='data/unified_qa_data.csv',sample_size=60):
+from utils import loadjson
+from instructions import *
+
+# ------------------------------------------------------------------
+# Dataset Configs
+# ------------------------------------------------------------------
+
+DATASET_CONFIGS: List[Dict] = [
+    {
+        "task_name": "alpaca_data",
+        "path": "data/alpaca_data/alpaca_data.json",
+        "format": "json",
+        "query_fields": ["instruction", "input"],
+        "ground_truth_field": "output",
+        "metric": "f1_score",
+        "task_description": "Instruction-following dataset for general-purpose QA."
+    },
+    {
+        "task_name": "GSM8K",
+        "path": [
+            "data/GSM8K/train-00000-of-00001.parquet",
+            "data/GSM8K/test-00000-of-00001.parquet",
+        ],
+        "format": "parquet",
+        "query_fields": ["question"],
+        "ground_truth_field": "answer",
+        "metric": "exact_match",
+        "task_description": "The GSM8K dataset is tailored for mathematical problem-solving tasks. It consists of natural language math problems that require the model to comprehend the problem statement, apply the correct mathematical operations, and provide the solution. The primary challenge lies in both parsing complex language and performing accurate calculations."
+        
+    },
+    {
+        "task_name": "hendrycks-MATH",
+        "path": [
+            "data/hendrycks-MATH/train-00000-of-00001.parquet",
+            "data/hendrycks-MATH/test-00000-of-00001.parquet",
+        ],
+        "format": "parquet",
+        "query_fields": ["problem"],
+        "ground_truth_fields": ["solution", "answer"],
+        "metric": "exact_match",
+        "task_description": "The hendrycks-MATH-benchmark (based on the MATH dataset) is designed for advanced mathematical reasoning and problem-solving tasks. It consists of high school competition-level mathematics problems (drawn from sources like AMC 10/12, AIME) across subjects such as Prealgebra, Algebra, Number Theory, Counting & Probability, Geometry, Intermediate Algebra, and Precalculus, with difficulty levels from 1 (easiest) to 5 (hardest). The model must comprehend complex problem statements, apply appropriate mathematical concepts and techniques, perform step-by-step derivations or proofs when needed, and arrive at the correct final numerical or symbolic answer (often presented in boxed format). The primary challenge lies in deep conceptual understanding, multi-step logical reasoning, and accurate computation without relying on simple pattern matching."
+    },
+    {
+        "task_name": "multi_news",
+        "path": "data/multi_news/multi_news.json",
+        "format": "json",
+        "query_fields": ["instruction", "input"],
+        "ground_truth_field": "output",
+        "metric": "f1_score",
+        "task_description": "Multi-document summarization."
+    },
+    {
+        "task_name": "SQUAD",
+        "path": "data/SQUAD/SQUAD.parquet",
+        "format": "parquet",
+        "query_fields": ["question"],
+        "ground_truth_field": "answers",
+        "ground_truth_subfield": "text",
+        "ground_truth_index": 0,
+        "metric": "f1_score",
+        "task_description": "Extractive question answering."
+    },
+]
+
+
+# ------------------------------------------------------------------
+# Helper Functions
+# ------------------------------------------------------------------
+
+def load_parquet_files(paths: Union[str, List[str]]) -> pd.DataFrame:
+    """Load one or multiple parquet files into a single DataFrame."""
+    if isinstance(paths, str):
+        paths = [paths]
+
+    frames = [pd.read_parquet(p) for p in paths]
+    return pd.concat(frames, ignore_index=True)
+
+
+def build_query(row: pd.Series, fields: List[str]) -> str:
+    """Construct query text from one or more fields."""
+    return " ".join(str(row[f]) for f in fields if f in row)
+
+
+# ------------------------------------------------------------------
+# Main Generator
+# ------------------------------------------------------------------
+
+def generate_unified_qa_dataset(
+    output_dir: str,
+    task_name: str,
+    sample_size: Optional[int] = None
+) -> pd.DataFrame:
     """
-    Generate a unified question-answering dataset from multiple data sources.
+    Generate a unified QA dataset for a single task.
 
-    Parameters:
-    sample_size (int): Number of samples to extract from each dataset
-    output_path (str): Path to save the output CSV file
+    Parameters
+    ----------
+    output_dir : str
+        Directory to save unified CSV.
+    task_name : str
+        Dataset task name.
+    sample_size : Optional[int]
+        Limit number of samples.
 
-    Returns:
-    pandas.DataFrame: The generated unified dataset
+    Returns
+    -------
+    pd.DataFrame
     """
-    # Initialize result DataFrame
-    df = pd.DataFrame(columns=[
-        'task_id', 'query', 'ground_truth', 'metric',
-        'task_description'  # Added task description column
-    ])
 
-    # Define dataset paths and corresponding task names with descriptions
-    dataset_configs = [
-        {
-            'task_name': 'alpaca_data',
-            'path': 'data/alpaca_data/alpaca_data.json',
-            'format': 'json',
-            'query_fields': ['instruction', 'input'],
-            'ground_truth_field': 'output',
-            'metric': 'f1_score',
-            'task_description': 'The Alpaca dataset is designed for instruction-following tasks, where the model is required to generate coherent and contextually appropriate responses to given instructions or prompts. It focuses on understanding diverse user requests and providing informative and accurate outputs based on those instructions.'
-        },
-        {
-            'task_name': 'GSM8K',
-            'path': 'data/GSM8K/GSM8K.json',
-            'format': 'json',
-            'query_fields': ['instruction', 'input'],
-            'ground_truth_field': 'answer',
-            'metric': 'GSM8K',
-            'task_description': 'The GSM8K dataset is tailored for mathematical problem-solving tasks. It consists of natural language math problems that require the model to comprehend the problem statement, apply the correct mathematical operations, and provide the solution. The primary challenge lies in both parsing complex language and performing accurate calculations.'
-        },
-        {
-            'task_name': 'multi_news',
-            'path': 'data/multi_news/multi_news.json',
-            'format': 'json',
-            'query_fields': ['instruction', 'input'],
-            'ground_truth_field': 'output',
-            'metric': 'f1_score',
-            'task_description': 'The Multi-News dataset is aimed at text summarization tasks. It contains multiple news articles on the same topic, and the model\'s objective is to generate a concise and comprehensive summary that integrates information from all the articles. The challenge is to distill key points while maintaining coherence and avoiding redundancy.'
-        },
-        {
-            'task_name': 'SQUAD',
-            'path': 'data/SQUAD/SQUAD.parquet',
-            'format': 'parquet',
-            'query_field': 'question',
-            'ground_truth_field': 'answers',
-            'ground_truth_subfield': 'text',
-            'ground_truth_index': 0,
-            'metric': 'f1_score',
-            'task_description': 'The SQuAD dataset is focused on question-answering tasks, where the model is given a passage of text and needs to extract or generate a precise answer to a question based on the content of the passage. The dataset emphasizes comprehension, retrieval of relevant information, and concise answer generation.'
-        }
-    ]
+    config_map = {cfg["task_name"]: cfg for cfg in DATASET_CONFIGS}
 
-    # Process each dataset
-    for config in dataset_configs:
-        # Load data
-        if config['format'] == 'json':
-            data = loadjson(config['path'])[:sample_size]
+    if task_name not in config_map:
+        raise ValueError(f"Unknown task_name: {task_name}")
 
-            # Process JSON formatted data
-            for item in data:
-                # Construct query text based on configuration
-                if isinstance(config['query_fields'], list):
-                    query = ''.join([item[field] for field in config['query_fields']])
-                else:
-                    query = item[config['query_fields']]
+    config = config_map[task_name]
+    rows = []
 
-                # Get ground truth
-                ground_truth = item[config['ground_truth_field']]
+    # -----------------------------
+    # JSON DATASETS
+    # -----------------------------
+    if config["format"] == "json":
+        data = loadjson(config["path"])
+        if sample_size:
+            data = data[:sample_size]
 
-                # Add to dataset
-                new_row = {
-                    'task_id': config['task_name'],
-                    'query': query,
-                    'ground_truth': ground_truth,
-                    'metric': config['metric'],
-                    'task_description': config['task_description']  # Add task description
-                }
-                df = df._append(new_row, ignore_index=True)
+        for item in data:
+            query = " ".join(str(item[f]) for f in config["query_fields"])
+            ground_truth = item[config["ground_truth_field"]]
 
-        elif config['format'] == 'parquet':
-            data = pd.read_parquet(config['path'])[:sample_size]
+            rows.append({
+                "task_id": config["task_name"],
+                "query": query,
+                "ground_truth": ground_truth,
+                "metric": config["metric"],
+                "task_description": config["task_description"],
+            })
 
-            # Process Parquet formatted data
-            for item in data.itertuples():
-                query = getattr(item, config['query_field'])
+    # -----------------------------
+    # PARQUET DATASETS (STANDARDIZED)
+    # -----------------------------
+    elif config["format"] == "parquet":
+        df = load_parquet_files(config["path"])
+        if sample_size:
+            df = df.head(sample_size)
 
-                # Handle complex ground truth structures
-                if 'ground_truth_subfield' in config:
-                    ground_truth_container = getattr(item, config['ground_truth_field'])
-                    ground_truth = ground_truth_container[config['ground_truth_subfield']][config['ground_truth_index']]
-                else:
-                    ground_truth = getattr(item, config['ground_truth_field'])
+        for _, row in df.iterrows():
+            query = build_query(row, config["query_fields"])
 
-                # add to dataset
-                new_row = {
-                    'task_id': config['task_name'],
-                    'query': query,
-                    'ground_truth': ground_truth,
-                    'metric': config['metric'],
-                    'task_description': config['task_description']  # Add task description
-                }
-                df = df._append(new_row, ignore_index=True)
+            # Hendrycks-MATH special handling
+            if config["task_name"] == "hendrycks-MATH":
+                query = f"{MATH_INSTRUCTION}\n\nQuestion:\n{query}"
+                solution, answer = config["ground_truth_fields"]
+                # فقط diagramهای [asy] ... [/asy] را حذف کن (برای embedding و semantic similarity نویز هستند)
 
-    # Save results to CSV
-    df.to_csv(output_path, index=False)
-
-    return df
+                solution_text = row[solution]
+                # Regular expression to remove all [asy]...[/asy] blocks (non-greedy, possibly multiline)
+                solution_text = re.sub(r"\[asy\].*?\[/asy\]", "", solution_text, flags=re.DOTALL).strip()
+                ground_truth = f"{solution_text}\n\n####\n\n{row[answer].strip()}"
+            elif config['task_name'] == "GSM8K":
+                query = f"{MATH_GSM8K_INSTRUCTION}\n{query}"
+                ground_truth = row[config["ground_truth_field"]]
+                
 
 
-# Usage example
+            # SQuAD handling
+            else:
+                answers = row[config["ground_truth_field"]]
+                ground_truth = answers[config["ground_truth_index"]][
+                    config["ground_truth_subfield"]
+                ]
+
+            rows.append({
+                "task_id": config["task_name"],
+                "query": query,
+                "ground_truth": ground_truth,
+                "metric": config["metric"],
+                "task_description": config["task_description"],
+            })
+
+    else:
+        raise ValueError(f"Unsupported format: {config['format']}")
+
+    df_out = pd.DataFrame(rows)
+    os.makedirs(output_dir, exist_ok=True)
+    df_out.to_csv(os.path.join(output_dir, "unified_data.csv"), index=False)
+
+    return df_out
+
+
+# ------------------------------------------------------------------
+# Entry Point
+# ------------------------------------------------------------------
+
 if __name__ == "__main__":
-    # Open config file
-    with open("configs/config.yaml", 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
-    # Generate dataset with default sample size
-    unified_dataset = generate_unified_qa_dataset(config['unified_qa_data_path'])
+    with open("configs/config.yaml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
 
-    # Or specify custom sample size
-    # unified_dataset = generate_unified_qa_dataset(config['unified_qa_data_path'],sample_size=100)
+    generate_unified_qa_dataset(
+        output_dir=cfg["data_dir"],
+        task_name=cfg["data_dir"].split('/')[-1],
+        sample_size=cfg.get("sample_size", None),
+    )

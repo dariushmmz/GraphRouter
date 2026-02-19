@@ -17,7 +17,7 @@ class LLMEngine:
     using various metrics for different tasks.
     """
 
-    def __init__(self, llm_names: List[str], llm_description: Dict[str, Dict[str, Any]]):
+    def __init__(self, llm_description: Dict[str, Dict[str, Any]]):
         """
         Initialize the LLM Engine with available models and their descriptions.
 
@@ -34,10 +34,10 @@ class LLMEngine:
                     ...
                 }
         """
-        self.llm_names = llm_names
+        # self.llm_names = llm_names
         self.llm_description = llm_description
 
-    def compute_cost(self, llm_idx: int, input_text: str, output_size: int) -> float:
+    def compute_cost(self, llm_name: int, input_text: str, output_size: int) -> float:
         """
         Calculate the cost of a model query based on input and output token counts.
 
@@ -53,7 +53,7 @@ class LLMEngine:
         input_size = len(tokenizer(input_text)['input_ids'])
 
         # Get pricing information for the selected model
-        llm_name = self.llm_names[llm_idx]
+        # llm_name = self.llm_names[llm_idx]
         input_price = self.llm_description[llm_name]["input_price"]
         output_price = self.llm_description[llm_name]["output_price"]
 
@@ -61,7 +61,7 @@ class LLMEngine:
         cost = input_size * input_price + output_size * output_price
         return cost
 
-    def get_llm_response(self, query: str, llm_idx: int) -> str:
+    def get_llm_response(self, query: str, llm_name: int, max_token: int) -> str:
         """
         Send a query to a language model and get its response.
 
@@ -75,15 +75,15 @@ class LLMEngine:
         Note:
             Includes a retry mechanism with a 2-second delay if the first attempt fails
         """
-        llm_name = self.llm_names[llm_idx]
+        # llm_name = self.llm_names[llm_idx]
         model = self.llm_description[llm_name]["model"]
 
         try:
-            response = model_prompting(llm_model=model, prompt=query)
+            response = model_prompting(llm_model=model, prompt=query, max_token_num=max_token)
         except:
             # If the request fails, wait and retry once
             time.sleep(2)
-            response = model_prompting(llm_model=model, prompt=query)
+            response = model_prompting(llm_model=model, prompt=query, max_token_num=max_token)
 
         return response
 

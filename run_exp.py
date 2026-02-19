@@ -11,7 +11,11 @@ parser.add_argument("--config_file", type=str, default="configs/config.yaml")
 args = parser.parse_args()
 with open(args.config_file, 'r', encoding='utf-8') as file:
     config = yaml.safe_load(file)
-wandb_key = config['wandb_key']
+
+from dotenv import load_dotenv
+load_dotenv() 
+
+wandb_key =  os.getenv("wandb_key")
 wandb.login(key=wandb_key)
 wandb.init(project="graph_router")
 

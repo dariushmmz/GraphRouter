@@ -1,0 +1,27 @@
+{
+
+    "Mixtral-8x7B Instruct v0.1": {
+        "feature": "Mixtral-8x7B Instruct v0.1 is a 46.7B effective parameter Sparse Mixture of Experts model, outperforming Llama 2 70B on benchmarks for instruction following, creative text generation, and multilingual tasks. Efficient for broad applications. Its cost per million tokens is 0.60, providing high capability at a moderate price.",
+        "input_price": 0.60,
+        "output_price": 0.60,
+        "model": "together_ai/mistralai/Mixtral-8x7B-Instruct-v0.1"
+    },
+    "Meta Llama 3.1 70B Instruct Turbo": {
+        "feature": "Meta's 70-billion-parameter Llama 3.1 Instruct Turbo is optimized for multilingual dialogue (8 languages), instruction following, and natural language generation with a 128K token context. Excels in chat, summarization, and coding. Its cost per million tokens is 0.88, delivering robust performance cost-effectively.",
+        "input_price": 0.88,
+        "output_price": 0.88,
+        "model": "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+    },
+    "LLlama-3.1 (8B)": {
+        "feature": "An 8-billion-parameter instruct-tuned model from Meta (Llama 3.1), with very large context support (≈131K tokens). Designed for general purpose tasks: chat, code generation, translation, summarization. Good balance between performance, memory footprint and cost, and useful for fast, cost-effective inference.",
+        "input_price": 0.18,
+        "output_price": 0.18,
+        "model": "together_ai/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    },
+    "Qwen2.5 7B Instruct Turbo": {
+        "feature": "A lightweight 7-billion-parameter instruct-tuned model from Qwen2.5, with 131K context length, RoPE, and advanced attention for efficient instruction following, text generation, and tasks like coding assistance. Ideal for resource-constrained environments. Its cost per million tokens is 0.30, highly affordable for everyday use.",
+        "input_price": 0.30,
+        "output_price": 0.30,
+        "model": "together_ai/Qwen/Qwen2.5-7B-Instruct-Turbo"
+    }
+}
